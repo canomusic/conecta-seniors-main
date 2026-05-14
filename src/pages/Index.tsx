@@ -19,8 +19,9 @@ export default function Index() {
     const isLogged = localStorage.getItem("is_logged");
     const role = localStorage.getItem("user_role");
     const name = localStorage.getItem("user_name");
+    const fName = localStorage.getItem("family_name");
     if (isLogged === "true") {
-      if (role === "family" && localStorage.getItem("family_name")) return "family_admin";
+      if (role === "family" && fName) return "family_admin";
       if (role === "senior" && name) return "home";
     }
     return "login";
@@ -82,19 +83,40 @@ export default function Index() {
     if (lc) setSeniorLocation(lc);
   }, [seniorCode]);
 
+  // --- ESCUCHA DE EVENTOS PARA NOTIFICACIONES DEL FAMILIAR ---
   useEffect(() => {
     if (['login', 'name_step', 'f_name_step'].includes(screen)) return;
     fetchData();
-    const sub = supabase.channel('api').on('postgres_changes', { event: '*', schema: 'public' }, () => fetchData()).subscribe();
+    const sub = supabase.channel('api')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'tasks' }, (payload) => {
+        fetchData();
+        // Si somos el familiar y la tarea se ha completado, avisamos
+        if (role === 'family' && payload.new.completed) {
+          toast.success(`¡${name || 'El abuelo/a'} ha completado: ${payload.new.title}!`);
+        }
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+        fetchData();
+        // Si somos el familiar y llega un mensaje nuevo (ya sea "Estoy bien" o texto normal)
+        if (role === 'family') {
+          if (payload.new.text === 'ESTOY_BIEN_SIGNAL') {
+             toast.success(`¡${name || 'El abuelo/a'} acaba de avisar que está bien!`, { icon: <Heart fill="#22C55E" className="text-green-500"/> });
+          } else if (payload.new.sender_name === name) {
+             toast("Nuevo mensaje", { description: `"${payload.new.text}"` });
+          }
+        }
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'locations' }, () => fetchData())
+      .subscribe();
+      
     return () => { supabase.removeChannel(sub); };
-  }, [fetchData, screen]);
+  }, [fetchData, screen, role, name]);
 
   return (
     <div className="h-screen bg-[#F8F9FA] flex justify-center font-sans overflow-hidden text-slate-800">
       <Toaster position="top-center" />
       <main className="w-full max-w-md bg-[#F8F9FA] relative h-full flex flex-col shadow-2xl overflow-hidden">
         
-        {/* MODAL UBICACIÓN ADAPTADO */}
         {showLocationPrompt && (
           <div className="absolute inset-0 z-[100] bg-black/60 flex items-center justify-center p-6">
             <div className="bg-white rounded-[30px] p-6 w-full shadow-2xl text-center">
@@ -112,9 +134,9 @@ export default function Index() {
             {screen === "login" && <Login onAccess={(r: any, c: any, n?: any, p?: any) => { setRole(r); setSeniorCode(c); localStorage.setItem("is_logged", "true"); localStorage.setItem("user_role", r); localStorage.setItem("senior_code", c); if (r === "family") { if (n) { setFamilyName(n); setScreen("family_admin"); } else setScreen("f_name_step"); } else { if (n) { setName(n); setScreen("home"); } else setScreen("name_step"); } }} />}
             {screen === "name_step" && <NameAndPhoneStep title="¿Cómo te llamas?" onNext={async (n: any, p: any) => { setName(n); localStorage.setItem("user_name", n); await supabase.from('family_pins').update({ senior_name: n, senior_phone: p }).eq('pin', seniorCode); setScreen("home"); }} />}
             {screen === "f_name_step" && <NameAndPhoneStep title="¿Quién eres?" onNext={async (n: any, p: any) => { setFamilyName(n); localStorage.setItem("family_name", n); await supabase.from('family_pins').update({ family_name: n, family_phone: p }).eq('pin', seniorCode); setScreen("family_admin"); }} />}
-            {screen === "home" && <Home name={name} latestTask={dbTasks[0]} onWellness={() => supabase.from('messages').insert([{ text: 'ESTOY_BIEN_SIGNAL', sender_name: name, pin: seniorCode }])} go={setScreen} />}
+            {screen === "home" && <Home name={name} latestTask={dbTasks[0]} onWellness={async () => { await supabase.from('messages').insert([{ text: 'ESTOY_BIEN_SIGNAL', sender_name: name, pin: seniorCode }]); toast.success("Aviso enviado a tu familia"); }} go={setScreen} />}
             {screen === "tasks" && <TasksListView tasks={dbTasks} onToggle={(id:any, s:any)=>supabase.from('tasks').update({completed:!s}).eq('id',id)} back={() => setScreen("home")} />}
-            {screen === "family" && <FamilySeniorView location={seniorLocation} messages={dbMessages} back={() => setScreen("home")} />}
+            {screen === "family" && <FamilySeniorView location={seniorLocation} messages={dbMessages} seniorName={name} seniorCode={seniorCode} back={() => setScreen("home")} />}
             {screen === "profile" && <Profile name={name} code={seniorCode} phone={seniorPhone} onLogout={() => { localStorage.clear(); window.location.reload(); }} back={() => setScreen("home")} />}
             {screen === "emergency" && <Emergency cancel={() => setScreen("home")} />}
             {screen === "video" && <VideoCallsView fName={familyName} fPhone={familyPhone} back={() => setScreen("home")} />}
@@ -126,34 +148,29 @@ export default function Index() {
   );
 }
 
-/* --- SPLASH SCREEN AJUSTADA ( image_a03b3d.png corregida ) --- */
+/* --- SPLASH SCREEN --- */
 function SplashScreen() {
   return (
     <div className="h-full bg-primary flex flex-col items-center justify-center p-8 text-white relative z-50">
       <div className="absolute top-[-5%] left-[-5%] w-40 h-40 bg-white/10 rounded-full blur-3xl animate-pulse"></div>
-      
-      {/* Imagen más compacta */}
       <div className="relative w-full max-w-[240px] aspect-[4/3] mb-10">
         <img src="/foto1.jpg" alt="Portada" className="w-full h-full object-cover rounded-[35px] border-4 border-white/20 shadow-2xl" />
         <div className="absolute -bottom-3 -right-3 bg-white p-3 rounded-full shadow-xl">
           <Heart className="text-[#E5484D]" fill="#E5484D" size={24} />
         </div>
       </div>
-
-      {/* Título responsivo que no se corta */}
       <div className="text-center px-4">
         <h1 className="text-[10vw] max-text-4xl font-black tracking-tighter mb-2 leading-none whitespace-nowrap">
           ConectaMayores
         </h1>
         <p className="text-blue-100 font-bold text-lg opacity-90 leading-tight">Tu familia, siempre cerca.</p>
       </div>
-
       <div className="mt-12 w-10 h-10 border-4 border-white/30 border-t-white rounded-full animate-spin"></div>
     </div>
   );
 }
 
-/* --- HOME AJUSTADO --- */
+/* --- HOME --- */
 function Home({ name, latestTask, onWellness, go }: any) {
   return (
     <div className="p-5 flex flex-col h-full justify-between overflow-y-auto">
@@ -172,7 +189,7 @@ function Home({ name, latestTask, onWellness, go }: any) {
         <NavBtn icon={<UserIcon size={26} className="text-primary"/>} label="Perfil" onClick={()=>go("profile")}/>
       </div>
       <div className="space-y-3">
-        <button onClick={()=>{onWellness(); toast.success("Enviado");}} className="w-full bg-primary text-white py-4 rounded-[20px] text-xl font-black shadow-lg flex items-center justify-center gap-3 active:scale-95 transition">
+        <button onClick={onWellness} className="w-full bg-primary text-white py-4 rounded-[20px] text-xl font-black shadow-lg flex items-center justify-center gap-3 active:scale-95 transition">
           <Heart fill="white" size={22}/> ¡Estoy bien!
         </button>
         <button onClick={()=>go("emergency")} className="w-full bg-[#E5484D] text-white py-4 rounded-[20px] text-2xl font-black shadow-lg">EMERGENCIA</button>
@@ -190,7 +207,7 @@ function NavBtn({ icon, label, onClick }: any) {
   );
 }
 
-/* --- PANEL FAMILIAR ADAPTADO --- */
+/* --- PANEL FAMILIAR --- */
 function FamilyAdmin({ fName, seniorName, sPhone, location, lastWellness, seniorCode, onLogout }: any) {
   const [taskIn, setTaskIn] = useState(""); const [timeIn, setTimeIn] = useState(""); const [msgIn, setMsgIn] = useState("");
   const addTask = async () => { if(!taskIn) return; await supabase.from('tasks').insert([{ title: taskIn, task_time: timeIn, completed: false, pin: seniorCode }]); setTaskIn(""); setTimeIn(""); toast.success("Tarea enviada"); };
@@ -229,12 +246,54 @@ function FamilyAdmin({ fName, seniorName, sPhone, location, lastWellness, senior
   );
 }
 
-/* --- VISTAS AUXILIARES COMPACTAS --- */
+/* --- VISTA FAMILIA SENIOR CON OPCIÓN DE RESPUESTA --- */
+function FamilySeniorView({ location, messages, seniorName, seniorCode, back }: any) { 
+  const [replyMsg, setReplyMsg] = useState("");
+  const sendReply = async () => {
+    if(!replyMsg) return;
+    await supabase.from('messages').insert([{ text: replyMsg, sender_name: seniorName, pin: seniorCode }]);
+    setReplyMsg("");
+    toast.success("Mensaje enviado a tu familia");
+  };
+
+  return ( 
+    <div className="h-full flex flex-col bg-[#F8F9FA]"> 
+      <div className="p-4 flex items-center gap-3 bg-white border-b"><button onClick={back} className="p-2 bg-gray-100 rounded-lg"><ArrowLeft size={18}/></button><h1 className="text-xl font-black italic">Familia</h1></div> 
+      <div className="p-4 flex-1 overflow-y-auto space-y-4"> 
+        <div className="bg-white p-4 rounded-3xl shadow-sm text-center"> 
+          <MapPin size={28} className="text-primary mx-auto mb-2 animate-bounce" /> 
+          <h2 className="text-lg font-black mb-3 leading-tight">Ubicación</h2> 
+          {location ? <MapView lat={location.lat} lng={location.lng} /> : <p className="text-slate-400 text-xs">Buscando GPS...</p>} 
+        </div> 
+
+        {/* Novedad: Enviar mensaje a la familia */}
+        <div className="bg-white p-4 rounded-xl border">
+          <p className="text-[9px] font-black text-slate-400 uppercase mb-2">Escribir a familia</p>
+          <div className="flex gap-2">
+            <input className="flex-1 p-2 bg-slate-50 rounded-lg font-bold text-sm outline-none" value={replyMsg} onChange={e=>setReplyMsg(e.target.value)} placeholder="Diles cómo estás..."/>
+            <button onClick={sendReply} className="bg-primary text-white p-2 rounded-lg shadow-md"><Send size={16}/></button>
+          </div>
+        </div>
+
+        <div className="space-y-3"> 
+          <h3 className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Conversación</h3> 
+          {messages.filter((m:any)=>m.text!=='ESTOY_BIEN_SIGNAL').map((m:any,i:number)=>( 
+            <div key={i} className={`p-4 rounded-xl shadow-sm border relative overflow-hidden ${m.sender_name === seniorName ? 'bg-blue-50 ml-6' : 'bg-white mr-6'}`}> 
+              <span className={`text-[8px] font-black text-white px-2 py-0.5 absolute top-0 uppercase ${m.sender_name === seniorName ? 'bg-blue-400 rounded-bl-lg right-0' : 'bg-primary rounded-br-lg left-0'}`}>{m.sender_name === seniorName ? 'Tú' : m.sender_name}</span> 
+              <p className="text-lg font-bold italic text-slate-700 mt-2 leading-tight">"{m.text}"</p> 
+            </div> 
+          ))} 
+        </div> 
+      </div> 
+    </div> 
+  ); 
+}
+
+/* --- MAPA Y OTRAS VISTAS (SIN CAMBIOS) --- */
 function MapView({ lat, lng }: any) { const mapUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.005},${lat-0.005},${lng+0.005},${lat+0.005}&layer=mapnik&marker=${lat},${lng}`; return ( <div className="w-full h-36 rounded-xl overflow-hidden border relative"> <iframe width="100%" height="100%" frameBorder="0" scrolling="no" src={mapUrl} style={{ border: 0 }} /> </div> ); }
 function Login({ onAccess }: any) { const [view, setView] = useState<any>("choice"); const [email, setEmail] = useState(""); const [pass, setPass] = useState(""); const [code, setCode] = useState(""); const [regN, setRegN] = useState(""); const [regP, setRegP] = useState(""); const handleF = async (m:any) => { const { error } = m === 'reg' ? await supabase.auth.signUp({ email, password: pass }) : await supabase.auth.signInWithPassword({ email, password: pass }); if (error) return toast.error(error.message); if (m === 'reg') await supabase.from('family_pins').upsert([{ pin: code, family_name: regN, family_phone: regP }]); const { data: pD } = await supabase.from('family_pins').select('*').eq('pin', code).single(); onAccess("family", code, pD?.family_name, pD?.family_phone); }; return ( <div className="p-6 flex flex-col h-full bg-white items-center justify-center animate-in fade-in duration-500"> <div className="mb-4 bg-primary p-4 rounded-3xl shadow-lg"><Heart fill="white" className="text-white w-10 h-10" /></div> <h1 className="text-3xl font-black mb-8 tracking-tighter leading-tight text-center px-4">ConectaMayores</h1> {view === "choice" && <div className="w-full space-y-3"><button onClick={() => setView("s_code")} className="w-full bg-primary text-white p-6 rounded-[25px] text-2xl font-black shadow-md">Soy Abuela/o</button><div className="flex gap-2"><button onClick={() => setView("f_login")} className="flex-1 bg-white text-slate-600 p-4 rounded-xl font-bold border">Entrar</button><button onClick={() => setView("f_reg")} className="flex-1 bg-slate-50 text-primary p-4 rounded-xl font-bold border">Registrar</button></div></div>} {view === "s_code" && <div className="w-full space-y-6"><h2 className="text-xl font-black text-center">Introduce PIN</h2><input type="number" className="w-full p-6 bg-slate-50 rounded-2xl text-5xl font-black text-center outline-none" value={code} onChange={e => setCode(e.target.value)} /><button onClick={async () => { const { data } = await supabase.from('family_pins').select('*').eq('pin', code).single(); if (data) onAccess("senior", code, data.senior_name, data.senior_phone); else toast.error("PIN no válido"); }} className="w-full bg-[#1EA851] text-white p-5 rounded-2xl text-xl font-black">ENTRAR</button><button onClick={() => setView("choice")} className="w-full text-slate-400 font-bold text-xs">Volver</button></div>} {view === "f_login" && <div className="w-full space-y-3"><input className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} /><input className="w-full p-3 bg-slate-50 border rounded-xl font-bold outline-none" type="password" placeholder="Pass" value={pass} onChange={e => setPass(e.target.value)} /><input className="w-full p-3 bg-blue-50 border rounded-xl font-bold outline-none" placeholder="PIN" value={code} onChange={e => setCode(e.target.value)} /><button onClick={()=>handleF('log')} className="w-full bg-primary text-white p-3 rounded-xl font-black">ENTRAR</button><button onClick={() => setView("choice")} className="w-full text-slate-400 font-bold mt-2 text-xs">Volver</button></div>} {view === "f_reg" && <div className="w-full space-y-2"><input className="w-full p-2 bg-slate-50 border rounded-lg text-sm" placeholder="Nombre" value={regN} onChange={e => setRegN(e.target.value)} /><input className="w-full p-2 bg-slate-50 border rounded-lg text-sm" placeholder="Tel" value={regP} onChange={e => setRegP(e.target.value)} /><input className="w-full p-2 bg-slate-50 border rounded-lg text-sm" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} /><input className="w-full p-2 bg-slate-50 border rounded-lg text-sm" type="password" placeholder="Pass" value={pass} onChange={e => setPass(e.target.value)} /><input className="w-full p-2 bg-blue-50 border rounded-lg text-sm" placeholder="PIN" value={code} onChange={e => setCode(e.target.value)} /><button onClick={()=>handleF('reg')} className="w-full bg-[#1EA851] text-white p-3 rounded-xl font-black mt-2">REGISTRAR</button></div>} </div> ); }
-function TasksListView({ tasks, onToggle, back }: any) { return ( <div className="h-full flex flex-col bg-[#F8F9FA]"><div className="p-4 flex items-center gap-3 bg-white border-b shadow-sm"><button onClick={back} className="p-2 bg-gray-100 rounded-lg"><ArrowLeft size={18}/></button><h1 className="text-xl font-black italic">Tareas</h1></div><div className="p-4 space-y-3 overflow-y-auto">{tasks.map((t:any)=>(<button key={t.id} onClick={()=>{onToggle(t.id, t.completed); toast.success("Listo");}} className={`w-full p-4 rounded-xl flex items-center justify-between border transition ${t.completed ? 'bg-green-50 opacity-60' : 'bg-white'}`}> <div className="flex flex-col items-start text-left"> {t.task_time && <span className="text-[8px] font-black text-primary bg-blue-50 px-2 rounded-lg">{t.task_time}</span>} <span className={`text-base font-bold ${t.completed ? 'line-through text-green-800' : 'text-slate-700'}`}>{t.title}</span> </div> {t.completed ? <CheckCircle2 className="text-green-500" size={22}/> : <Circle className="text-slate-200" size={22}/>}</button>))}</div></div> ); }
+function TasksListView({ tasks, onToggle, back }: any) { return ( <div className="h-full flex flex-col bg-[#F8F9FA]"><div className="p-4 flex items-center gap-3 bg-white border-b shadow-sm"><button onClick={back} className="p-2 bg-gray-100 rounded-lg"><ArrowLeft size={18}/></button><h1 className="text-xl font-black italic">Tareas</h1></div><div className="p-4 space-y-3 overflow-y-auto">{tasks.map((t:any)=>(<button key={t.id} onClick={()=>{onToggle(t.id, t.completed);}} className={`w-full p-4 rounded-xl flex items-center justify-between border transition ${t.completed ? 'bg-green-50 opacity-60' : 'bg-white'}`}> <div className="flex flex-col items-start text-left"> {t.task_time && <span className="text-[8px] font-black text-primary bg-blue-50 px-2 rounded-lg">{t.task_time}</span>} <span className={`text-base font-bold ${t.completed ? 'line-through text-green-800' : 'text-slate-700'}`}>{t.title}</span> </div> {t.completed ? <CheckCircle2 className="text-green-500" size={22}/> : <Circle className="text-slate-200" size={22}/>}</button>))}</div></div> ); }
 function NameAndPhoneStep({ title, onNext }: any) { const [n, setN] = useState(""); const [p, setP] = useState(""); return ( <div className="p-8 flex flex-col h-full bg-white"><h1 className="text-3xl font-black mt-10 leading-tight tracking-tighter">{title}</h1><input className="mt-8 w-full p-3 border-b-4 border-primary text-2xl font-black outline-none placeholder:text-slate-100" value={n} onChange={e=>setN(e.target.value)} placeholder="Nombre" /><input type="tel" className="mt-4 w-full p-3 border-b-4 border-[#1EA851] text-2xl font-black outline-none placeholder:text-slate-100" value={p} onChange={e=>setP(e.target.value)} placeholder="Teléfono" /><button onClick={() => { if(n&&p) onNext(n, p); else toast.error("Rellena ambos") }} className="mt-auto w-full bg-primary text-white py-4 rounded-xl font-black text-lg shadow-lg">CONTINUAR</button></div> ); }
 function Emergency({ cancel }: any) { return ( <div className="h-full bg-[#E5484D] flex flex-col items-center justify-center p-8 text-white text-center"><AlertTriangle size={80} className="mb-4 opacity-40 animate-pulse" /><h1 className="text-7xl font-black leading-none mb-8 tracking-tighter">112</h1><button onClick={cancel} className="w-full bg-white text-[#E5484D] py-5 rounded-2xl text-2xl font-black shadow-xl transition active:scale-95">CANCELAR</button></div> ); }
-function FamilySeniorView({ location, messages, back }: any) { return ( <div className="h-full flex flex-col bg-[#F8F9FA]"> <div className="p-4 flex items-center gap-3 bg-white border-b"><button onClick={back} className="p-2 bg-gray-100 rounded-lg"><ArrowLeft size={18}/></button><h1 className="text-xl font-black italic">Familia</h1></div> <div className="p-4 flex-1 overflow-y-auto space-y-4"> <div className="bg-white p-4 rounded-3xl shadow-sm text-center"> <MapPin size={28} className="text-primary mx-auto mb-2 animate-bounce" /> <h2 className="text-lg font-black mb-3 leading-tight">Ubicación</h2> {location ? <MapView lat={location.lat} lng={location.lng} /> : <p className="text-slate-400 text-xs">Buscando GPS...</p>} </div> <div className="space-y-3"> <h3 className="text-[10px] font-black text-slate-400 uppercase ml-2 tracking-widest">Mensajes</h3> {messages.filter((m:any)=>m.text!=='ESTOY_BIEN_SIGNAL').map((m:any,i:number)=>( <div key={i} className="bg-white p-4 rounded-xl shadow-sm border relative overflow-hidden"> <span className="text-[8px] font-black bg-primary text-white px-2 py-0.5 rounded-br-lg absolute top-0 left-0 uppercase">{m.sender_name}</span> <p className="text-lg font-bold italic text-slate-700 mt-2 leading-tight">"{m.text}"</p> </div> ))} </div> </div> </div> ); }
 function VideoCallsView({ fName, fPhone, back }: any) { return ( <div className="h-full flex flex-col bg-[#F8F9FA]"><div className="p-4 flex items-center gap-3 bg-white border-b"><button onClick={back} className="p-2 bg-gray-100 rounded-lg"><ArrowLeft size={18}/></button><h1 className="text-xl font-black italic">Llamar</h1></div><div className="p-4 space-y-3"><button onClick={() => fPhone && (window.location.href = `tel:${fPhone}`)} className="w-full bg-white p-6 rounded-2xl flex items-center justify-between shadow-sm border active:scale-95 transition"><div><p className="font-black text-lg text-slate-800 leading-none">{fName || "Familia"}</p><p className="text-slate-400 font-bold text-xs mt-1">{fPhone || "Sin número"}</p></div><div className="bg-green-100 p-3 rounded-full text-green-600"><Phone fill="currentColor" size={20}/></div></button></div></div> ); }
 function Profile({ name, code, phone, onLogout, back }: any) { return ( <div className="h-full flex flex-col bg-white p-5 justify-between"><div><div className="flex items-center gap-3 mb-6"><button onClick={back} className="p-2 bg-slate-100 rounded-lg"><ArrowLeft size={18}/></button><h1 className="text-xl font-black italic">Perfil</h1></div><div className="bg-slate-50 p-6 rounded-[30px] text-center border shadow-inner"><h2 className="text-3xl font-black text-primary mb-1 truncate">{name}</h2><p className="font-black text-slate-800 text-sm mb-3">{phone}</p><p className="font-black text-slate-300 uppercase text-[9px] tracking-widest">PIN: {code}</p></div></div><button onClick={onLogout} className="w-full bg-red-50 text-red-500 py-4 rounded-xl font-black text-lg flex items-center justify-center gap-2 active:scale-95 transition"><LogOut size={18}/> SALIR</button></div> ); }
