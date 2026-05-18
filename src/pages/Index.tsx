@@ -79,16 +79,14 @@ export default function Index() {
     }
   }, [screen, showSplash]);
 
-  // --- FUNCIÓN MEJORADA: DISPARA NOTIFICACIONES REALES EN TU PANTALLA ---
+  // --- FUNCIÓN SÚPER ENCARGADA DE MANDAR ENTRADAS DE MENSAJES PUSH A SUPABASE ---
   const triggerPushNotification = useCallback(async (title: string, body: string) => {
     if (!seniorCode) return;
     try {
-      // 1. Lo registra en la base de datos
       await supabase.from('notifications_log').insert([
         { pin: seniorCode, title, body, sender_role: role, created_at: new Date().toISOString() }
       ]);
       
-      // 2. ¡MÁGIA DE PRUEBA! Lanza la notificación directamente en tu sistema operativo
       if ('Notification' in window && Notification.permission === 'granted' && 'serviceWorker' in navigator) {
         const reg = await navigator.serviceWorker.ready;
         reg.showNotification(title, {
@@ -99,7 +97,7 @@ export default function Index() {
         });
       }
     } catch (e) {
-      console.error("Error al registrar o mostrar notificación", e);
+      console.error("Error al registrar notificación push", e);
     }
   }, [seniorCode, role]);
 
@@ -490,8 +488,11 @@ function Emergency({ cancel, onCall }: any) {
   );
 }
 
-/* --- AGENDA FAMILIAR --- */
+/* --- AGENDA FAMILIAR CON NUEVO TECLADO --- */
 function VideoCallsView({ role, fPhone, seniorName, sPhone, back }: any) { 
+  const [showDialer, setShowDialer] = useState(false);
+  const [manualPhone, setManualPhone] = useState("");
+
   let contacts: any[] = [];
   if (role === 'senior') {
     try {
@@ -508,27 +509,65 @@ function VideoCallsView({ role, fPhone, seniorName, sPhone, back }: any) {
         <button onClick={back} className="p-2 bg-gray-100 rounded-lg"><ArrowLeft size={18}/></button>
         <h1 className="text-xl font-black italic">Llamar</h1>
       </div>
-      <div className="p-4 space-y-3 overflow-y-auto mt-2">
-        {role === 'family' ? (
-           <button onClick={() => sPhone && (window.location.href = `tel:${sPhone}`)} className="w-full bg-blue-500 text-white p-6 rounded-3xl flex items-center justify-between shadow-xl active:scale-95 transition">
-             <div className="text-left">
-               <p className="font-black text-2xl leading-none uppercase">{seniorName || "Abuela/o"}</p>
-               <p className="text-blue-100 font-bold text-sm mt-2">{sPhone || "Sin número"}</p>
-             </div>
-             <div className="bg-white/20 p-4 rounded-full"><Phone fill="currentColor" size={28}/></div>
-           </button>
+      
+      <div className="p-4 space-y-3 overflow-y-auto mt-2 flex-1">
+        {showDialer ? (
+          <div className="bg-white p-6 rounded-3xl border shadow-sm animate-in fade-in slide-in-from-bottom-4">
+            <h2 className="font-black text-xl mb-4 text-slate-800 text-center">Marcar número</h2>
+            <input
+              type="tel"
+              className="w-full p-4 bg-slate-50 border-2 border-blue-100 rounded-xl text-3xl font-black text-center mb-6 outline-none tracking-widest text-slate-700"
+              placeholder="Ej: 600123456"
+              value={manualPhone}
+              onChange={(e) => setManualPhone(e.target.value)}
+            />
+            <div className="flex gap-2">
+              <button onClick={() => setShowDialer(false)} className="flex-1 bg-slate-100 text-slate-500 p-4 rounded-xl font-bold">Cancelar</button>
+              <button
+                onClick={() => manualPhone && (window.location.href = `tel:${manualPhone}`)}
+                className="flex-1 bg-blue-500 text-white p-4 rounded-xl font-black flex items-center justify-center gap-2"
+              >
+                <Phone size={20} fill="currentColor" /> Llamar
+              </button>
+            </div>
+          </div>
         ) : (
           <>
-            {contacts.map((c, idx) => (
-              <button key={idx} onClick={() => c.phone && (window.location.href = `tel:${c.phone}`)} className="w-full bg-white p-6 rounded-3xl flex items-center justify-between border shadow-sm active:scale-95 transition mb-3">
-                <div className="text-left">
-                  <p className="font-black text-xl text-slate-800 leading-none uppercase">{c.name}</p>
-                  <p className="text-slate-400 font-bold text-sm mt-1">{c.phone}</p>
-                </div>
-                <div className="bg-blue-100 p-4 rounded-full text-blue-500"><Phone fill="currentColor" size={24}/></div>
-              </button>
-            ))}
-            {contacts.length === 0 && <p className="text-center text-slate-400 text-sm font-bold mt-10">Ningún familiar ha registrado su teléfono aún.</p>}
+            {/* Lista de contactos */}
+            {role === 'family' ? (
+               <button onClick={() => sPhone && (window.location.href = `tel:${sPhone}`)} className="w-full bg-blue-500 text-white p-6 rounded-3xl flex items-center justify-between shadow-xl active:scale-95 transition">
+                 <div className="text-left">
+                   <p className="font-black text-2xl leading-none uppercase">{seniorName || "Abuela/o"}</p>
+                   <p className="text-blue-100 font-bold text-sm mt-2">{sPhone || "Sin número"}</p>
+                 </div>
+                 <div className="bg-white/20 p-4 rounded-full"><Phone fill="currentColor" size={28}/></div>
+               </button>
+            ) : (
+              <>
+                {contacts.map((c, idx) => (
+                  <button key={idx} onClick={() => c.phone && (window.location.href = `tel:${c.phone}`)} className="w-full bg-white p-6 rounded-3xl flex items-center justify-between border shadow-sm active:scale-95 transition mb-3">
+                    <div className="text-left">
+                      <p className="font-black text-xl text-slate-800 leading-none uppercase">{c.name}</p>
+                      <p className="text-slate-400 font-bold text-sm mt-1">{c.phone}</p>
+                    </div>
+                    <div className="bg-blue-100 p-4 rounded-full text-blue-500"><Phone fill="currentColor" size={24}/></div>
+                  </button>
+                ))}
+                {contacts.length === 0 && <p className="text-center text-slate-400 text-sm font-bold mt-10 mb-4">Ningún familiar ha registrado su teléfono aún.</p>}
+              </>
+            )}
+
+            {/* BOTÓN NUEVO DE TECLADO LIBRE (Se ha cambiado Keypad por Phone para evitar el error) */}
+            <button 
+              onClick={() => setShowDialer(true)} 
+              className="w-full bg-slate-100 p-6 rounded-3xl flex items-center justify-between border shadow-sm active:scale-95 transition mt-2"
+            >
+              <div className="text-left">
+                <p className="font-black text-xl text-slate-800 leading-none uppercase">Marcar número</p>
+                <p className="text-slate-500 font-bold text-sm mt-1">Llamar a otro teléfono</p>
+              </div>
+              <div className="bg-white p-4 rounded-full text-slate-600 shadow-sm"><Phone size={24}/></div>
+            </button>
           </>
         )}
       </div>
@@ -536,7 +575,7 @@ function VideoCallsView({ role, fPhone, seniorName, sPhone, back }: any) {
   ); 
 }
 
-/* --- VISTA CHAT --- */
+/* --- VISTA CHAT SIN "APLASTAMIENTOS" --- */
 function ChatView({ messages, myName, pin, onSend, back }: any) {
   const [msgIn, setMsgIn] = useState("");
   const sendMsg = async () => { 
@@ -551,11 +590,11 @@ function ChatView({ messages, myName, pin, onSend, back }: any) {
         <button onClick={back} className="p-2 bg-slate-100 rounded-lg"><ArrowLeft size={18}/></button>
         <h1 className="text-xl font-black italic">Chat Familiar</h1>
       </div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-2 flex flex-col-reverse custom-scroll pb-6">
+      <div className="flex-1 overflow-y-auto p-4 flex flex-col-reverse gap-3 custom-scroll pb-6">
         {messages.filter((m:any)=>m.text!=='ESTOY_BIEN_SIGNAL').map((m:any, i:number) => {
           const isMe = m.sender_name === myName;
           return (
-            <div key={i} className={`p-4 rounded-2xl shadow-sm border relative overflow-hidden ${isMe ? 'bg-blue-50 ml-10 border-blue-100' : 'bg-white mr-10 border-slate-200'}`}>
+            <div key={i} className={`shrink-0 p-4 rounded-2xl shadow-sm border relative overflow-hidden ${isMe ? 'bg-blue-50 ml-10 border-blue-100' : 'bg-white mr-10 border-slate-200'}`}>
               <span className={`text-[8px] font-black text-white px-2 py-0.5 absolute top-0 uppercase ${isMe ? 'bg-blue-400 right-0 rounded-bl-lg' : 'bg-blue-500 left-0 rounded-br-lg'}`}>
                 {isMe ? 'Yo' : m.sender_name}
               </span>
