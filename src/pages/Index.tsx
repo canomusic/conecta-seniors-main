@@ -11,11 +11,13 @@ type Task = { id: string; title: string; completed: boolean; task_time?: string;
 type Message = { text: string; sender_name: string; created_at: string; pin: string };
 type Location = { lat: number; lng: number; updated_at: string };
 
+const APP_BLUE = "#3b82f6"; 
+
 export default function Index() {
   const [showSplash, setShowSplash] = useState(true);
   const [showLocationPrompt, setShowLocationPrompt] = useState(false);
 
-  // --- NAVEGACIÓN ---
+  // --- NAVEGACIÓN TOTALMENTE BLINDADA ---
   const [screen, setScreen] = useState<Screen>(() => {
     const isLogged = localStorage.getItem("is_logged");
     const role = localStorage.getItem("user_role");
@@ -94,7 +96,7 @@ export default function Index() {
     }
     const { data: tk } = await supabase.from('tasks').select('*').eq('pin', seniorCode).order('created_at', { ascending: false });
     if (tk) setDbTasks(tk);
-    const { data: ms } = await supabase.from('messages').select('*').eq('pin', seniorCode).order('created_at', { ascending: false }).limit(30);
+    const { data: ms = [] } = await supabase.from('messages').select('*').eq('pin', seniorCode).order('created_at', { ascending: false }).limit(30);
     if (ms) setDbMessages(ms);
     const { data: wl = [] } = await supabase.from('messages').select('created_at').eq('text', 'ESTOY_BIEN_SIGNAL').eq('pin', seniorCode).order('created_at', { ascending: false }).limit(1);
     if (wl && wl[0]) setLastWellness(new Date(wl[0].created_at).toLocaleTimeString());
@@ -118,12 +120,18 @@ export default function Index() {
     localStorage.setItem("senior_code", c);
 
     if (r === "family") {
+      if (n) { setFamilyName(n); localStorage.setItem("family_name", n); }
       setScreen("family_home");
     } else if (r === "family_needs_name") {
-      setScreen("f_name_step");
+      setScreen("f_name_step"); // ESTO ACTIVA LA PANTALLA DE QUIÉN ERES EN EL REGISTRO
     } else {
-      if (n && n.trim() !== "") { setName(n); localStorage.setItem("user_name", n); setScreen("home"); } 
-      else setScreen("name_step");
+      if (n && n.trim() !== "") { 
+        setName(n); 
+        localStorage.setItem("user_name", n); 
+        setScreen("home"); 
+      } else {
+        setScreen("name_step");
+      }
     }
   };
 
@@ -160,9 +168,19 @@ export default function Index() {
         {showSplash ? <SplashScreen /> : (
           <>
             {screen === "login" && <Login onAccess={handleAccess} />}
+            
+            {/* ABUELO (CREAR NOMBRE) */}
             {screen === "name_step" && <NameAndPhoneStep title="¿Cómo te llamas?" onNext={async (n: any, p: any) => { setName(n); localStorage.setItem("user_name", n); await supabase.from('family_pins').update({ senior_name: n, senior_phone: p }).eq('pin', seniorCode); setScreen("home"); }} />}
+
+            {/* FAMILIAR (QUIÉN ERES - SOLO AL REGISTRARSE) */}
             {screen === "f_name_step" && <NameAndPhoneStep title="¿Quién eres?" onNext={async (n: any, p: any) => { 
-              setFamilyName(n); localStorage.setItem("family_name", n); 
+              setFamilyName(n); 
+              localStorage.setItem("family_name", n); 
+              
+              // GUARDAR SU NOMBRE EN SUPABASE AUTH PARA RECORDARLO SIEMPRE
+              await supabase.auth.updateUser({ data: { name: n } });
+
+              // GUARDARLO EN LA LISTA DE LLAMADAS DEL ABUELO
               const { data: exist } = await supabase.from('family_pins').select('*').eq('pin', seniorCode).single();
               if (exist) {
                 let newContacts = [];
@@ -192,7 +210,7 @@ export default function Index() {
   );
 }
 
-/* --- MENÚ ABUELA CON CAJA DE TAREAS GIGANTE --- */
+/* --- MENÚ ABUELA --- */
 function SeniorHome({ name, latestTask, onWellness, go }: any) {
   const cleanTaskTitle = latestTask ? latestTask.title.replace(' (diaria)', '').replace(' (Todos los días)', '') : "¡Sin tareas pendientes!";
 
@@ -230,7 +248,7 @@ function SeniorHome({ name, latestTask, onWellness, go }: any) {
   );
 }
 
-/* --- MENÚ FAMILIAR (BLOQUES) --- */
+/* --- MENÚ FAMILIAR --- */
 function FamilyHome({ fName, seniorName, location, lastWellness, go, onLogout }: any) {
   return (
     <div className="p-4 flex flex-col h-full overflow-y-auto pb-6 bg-[#F8F9FA]">
@@ -245,9 +263,9 @@ function FamilyHome({ fName, seniorName, location, lastWellness, go, onLogout }:
         {location ? <MapView lat={location.lat} lng={location.lng} /> : <div className="h-32 bg-slate-50 rounded-2xl flex items-center justify-center text-xs font-bold text-slate-300">Buscando señal GPS...</div>}
       </div>
 
-      <div className="bg-white p-4 rounded-2xl border border-green-50 mb-6 flex justify-between items-center shadow-sm">
+      <div className="bg-white p-4 rounded-2xl border border-slate-100 mb-6 flex justify-between items-center shadow-sm">
         <p className="text-sm font-black italic">{lastWellness ? `Último aviso: ${lastWellness}` : "Sin avisos hoy"}</p>
-        <Heart fill={lastWellness ? "#22C55E" : "#CBD5E1"} size={22} className={lastWellness ? "text-green-500" : "text-slate-300"}/>
+        <Heart fill={lastWellness ? APP_BLUE : "#CBD5E1"} size={22} className={lastWellness ? "text-primary" : "text-slate-300"}/>
       </div>
 
       <div className="grid grid-cols-2 gap-3 mt-auto">
@@ -285,14 +303,14 @@ function TasksView({ tasks, role, onToggle, onAdd, back }: any) {
         {tasks.map((t:any)=>{
           const displayTitle = t.title.replace(' (diaria)', '').replace(' (Todos los días)', '');
           return (
-            <button key={t.id} onClick={()=>onToggle(t.id, t.completed)} className={`w-full p-5 rounded-2xl flex items-center justify-between border shadow-sm transition active:scale-95 ${t.completed ? 'bg-green-50/50 border-green-100' : 'bg-white'}`}> 
+            <button key={t.id} onClick={()=>onToggle(t.id, t.completed)} className={`w-full p-5 rounded-2xl flex items-center justify-between border shadow-sm transition active:scale-95 ${t.completed ? 'bg-blue-50/50 border-blue-100' : 'bg-white'}`}> 
               <div className="flex flex-col items-start text-left pr-2"> 
                 {t.task_time && <span className="text-[10px] font-black text-primary bg-blue-50 px-2 py-0.5 rounded-lg mb-1">{t.task_time}</span>} 
-                <span className={`text-lg font-bold leading-tight ${t.completed ? 'line-through text-green-700/60' : 'text-slate-800'}`}>
+                <span className={`text-lg font-bold leading-tight ${t.completed ? 'line-through text-primary/60' : 'text-slate-800'}`}>
                   {displayTitle}
                 </span> 
               </div> 
-              {t.completed ? <CheckCircle2 className="text-green-500 shrink-0" size={26}/> : <Circle className="text-slate-300 shrink-0" size={26}/>}
+              {t.completed ? <CheckCircle2 className="text-primary shrink-0" size={26}/> : <Circle className="text-slate-300 shrink-0" size={26}/>}
             </button>
           )
         })}
@@ -316,7 +334,7 @@ function TasksView({ tasks, role, onToggle, onAdd, back }: any) {
   )
 }
 
-/* --- EMERGENCIA: ESTILO AGENDA ROJA --- */
+/* --- EMERGENCIA --- */
 function Emergency({ cancel }: any) {
   return (
     <div className="h-full flex flex-col bg-[#F8F9FA]">
@@ -343,7 +361,7 @@ function Emergency({ cancel }: any) {
   );
 }
 
-/* --- AGENDA FAMILIAR DINÁMICA --- */
+/* --- AGENDA FAMILIAR --- */
 function VideoCallsView({ role, fPhone, seniorName, sPhone, back }: any) { 
   let contacts: any[] = [];
   if (role === 'senior') {
@@ -363,10 +381,10 @@ function VideoCallsView({ role, fPhone, seniorName, sPhone, back }: any) {
       </div>
       <div className="p-4 space-y-3 overflow-y-auto mt-2">
         {role === 'family' ? (
-           <button onClick={() => sPhone && (window.location.href = `tel:${sPhone}`)} className="w-full bg-[#1EA851] text-white p-6 rounded-3xl flex items-center justify-between shadow-xl active:scale-95 transition">
+           <button onClick={() => sPhone && (window.location.href = `tel:${sPhone}`)} className="w-full bg-primary text-white p-6 rounded-3xl flex items-center justify-between shadow-xl active:scale-95 transition">
              <div className="text-left">
                <p className="font-black text-2xl leading-none uppercase">{seniorName || "Abuela/o"}</p>
-               <p className="text-green-100 font-bold text-sm mt-2">{sPhone || "Sin número"}</p>
+               <p className="text-blue-100 font-bold text-sm mt-2">{sPhone || "Sin número"}</p>
              </div>
              <div className="bg-white/20 p-4 rounded-full"><Phone fill="currentColor" size={28}/></div>
            </button>
@@ -378,7 +396,7 @@ function VideoCallsView({ role, fPhone, seniorName, sPhone, back }: any) {
                   <p className="font-black text-xl text-slate-800 leading-none uppercase">{c.name}</p>
                   <p className="text-slate-400 font-bold text-sm mt-1">{c.phone}</p>
                 </div>
-                <div className="bg-green-100 p-4 rounded-full text-green-600"><Phone fill="currentColor" size={24}/></div>
+                <div className="bg-blue-100 p-4 rounded-full text-primary"><Phone fill="currentColor" size={24}/></div>
               </button>
             ))}
             {contacts.length === 0 && <p className="text-center text-slate-400 text-sm font-bold mt-10">Ningún familiar ha registrado su teléfono aún.</p>}
@@ -389,7 +407,7 @@ function VideoCallsView({ role, fPhone, seniorName, sPhone, back }: any) {
   ); 
 }
 
-/* --- VISTA CHAT COMPARTIDA --- */
+/* --- VISTA CHAT --- */
 function ChatView({ messages, myName, pin, back }: any) {
   const [msgIn, setMsgIn] = useState("");
   const sendMsg = async () => { if(!msgIn) return; await supabase.from('messages').insert([{ text: msgIn, sender_name: myName, pin }]); setMsgIn(""); };
@@ -420,125 +438,151 @@ function ChatView({ messages, myName, pin, back }: any) {
   );
 }
 
-/* --- LOGIN SANEADO CON VALIDACIÓN DE PINES --- */
+/* --- LOGIN LIMPIO Y POR PASOS --- */
 function Login({ onAccess }: any) {
   const [view, setView] = useState<any>("choice");
   const [email, setEmail] = useState("");
   const [pass, setPass] = useState("");
   const [code, setCode] = useState("");
-  const [regN, setRegN] = useState("");
-  const [regP, setRegP] = useState("");
 
   const handleF = async (m: any) => {
-    if (!email || !pass || !code) return toast.error("Faltan datos");
+    if (!email || !pass || !code) {
+      return toast.error("Faltan datos por rellenar.");
+    }
+    
+    // Validar el PIN: EL FAMILIAR NUNCA CREA EL PIN, DEBE EXISTIR
     const { data: exist } = await supabase.from('family_pins').select('*').eq('pin', code).single();
-    if (m === 'log' && !exist) return toast.error("Ese PIN no existe. Asegúrate de registrarte primero.");
-    const { error } = m === 'reg' ? await supabase.auth.signUp({ email, password: pass }) : await supabase.auth.signInWithPassword({ email, password: pass });
-    if (error) return toast.error("Error al entrar. Revisa la contraseña.");
+    if (!exist) {
+      return toast.error("Ese PIN no existe. La abuela/o debe entrar primero para crearlo.");
+    }
+    
     if (m === 'reg') {
-      let newContacts = [];
-      if (!exist) {
-        newContacts = [{ name: regN, phone: regP }];
-        await supabase.from('family_pins').insert([{ pin: code, family_phone: JSON.stringify(newContacts) }]);
-      } else {
-        try { newContacts = exist.family_phone ? JSON.parse(exist.family_phone) : []; } catch(e) { newContacts = []; }
-        if (!Array.isArray(newContacts)) newContacts = [];
-        newContacts.push({ name: regN, phone: regP });
-        await supabase.from('family_pins').update({ family_phone: JSON.stringify(newContacts) }).eq('pin', code);
+      const res = await supabase.auth.signUp({ email, password: pass });
+      
+      if (res.error) {
+        if (res.error.message.includes("already registered")) return toast.error("Este correo ya está registrado. Toca 'Entrar'.");
+        if (res.error.message.includes("least 6 characters")) return toast.error("La contraseña debe tener mínimo 6 caracteres.");
+        return toast.error("Error al registrar: " + res.error.message);
       }
-      localStorage.setItem("family_name", regN);
-      onAccess("family", code, regN);
+      
+      // REGISTRO CORRECTO: Lo mandamos al paso 2 para que ponga su nombre
+      onAccess("family_needs_name", code, "");
+
     } else {
-      const nameToUse = localStorage.getItem("family_name");
-      if (!nameToUse) onAccess("family_needs_name", code, ""); else onAccess("family", code, nameToUse);
+      const res = await supabase.auth.signInWithPassword({ email, password: pass });
+      
+      if (res.error) {
+        if (res.error.message.includes("Invalid login")) return toast.error("Correo o contraseña incorrectos.");
+        return toast.error("Error al entrar: " + res.error.message);
+      }
+      
+      // ENTRADA CORRECTA: Recuperamos su nombre de la base de datos
+      const nameFromDB = res.data?.user?.user_metadata?.name;
+      if (nameFromDB) {
+        localStorage.setItem("family_name", nameFromDB);
+        onAccess("family", code, nameFromDB);
+      } else {
+        // Por si acaso su nombre se perdió, le pedimos que lo vuelva a meter
+        onAccess("family_needs_name", code, "");
+      }
     }
   };
 
   return (
     <div className="p-6 flex flex-col h-full bg-white items-center justify-center text-center">
-      <div className="mb-4 bg-primary p-4 rounded-3xl shadow-lg"><Heart fill="white" className="text-white w-10 h-10" /></div>
+      <div className="mb-4 bg-primary p-4 rounded-3xl shadow-lg">
+        <Heart fill="white" className="text-white w-10 h-10" />
+      </div>
       <h1 className="text-4xl font-black mb-10 tracking-tighter leading-none">Conecta<br/>Mayores</h1>
+      
       {view === "choice" && (
         <div className="w-full space-y-3">
-          <button onClick={() => setView("s_code")} className="w-full bg-primary text-white p-6 rounded-[25px] text-2xl font-black uppercase shadow-lg">Soy Abuela/o</button>
+          <button onClick={() => setView("s_code")} className="w-full bg-primary text-white p-6 rounded-[25px] text-2xl font-black uppercase shadow-lg">
+            Soy Abuela/o
+          </button>
           <div className="flex gap-2">
             <button onClick={() => setView("f_login")} className="flex-1 bg-white text-slate-600 p-4 rounded-xl font-bold border">Entrar</button>
             <button onClick={() => setView("f_reg")} className="flex-1 bg-slate-50 text-primary p-4 rounded-xl font-bold border">Registrar</button>
           </div>
         </div>
       )}
+      
       {view === "s_code" && (
         <div className="w-full space-y-6">
           <h2 className="text-xl font-black">PIN de Acceso</h2>
           <input type="number" className="w-full p-6 bg-slate-50 rounded-2xl text-5xl font-black text-center outline-none border" value={code} onChange={e => setCode(e.target.value)} />
-          <button onClick={async () => { const { data } = await supabase.from('family_pins').select('*').eq('pin', code).single(); if (data) onAccess("senior", code, data.senior_name); else toast.error("PIN no válido."); }} className="w-full bg-[#1EA851] text-white p-5 rounded-2xl text-xl font-black uppercase">Entrar</button>
+          <button onClick={async () => { 
+            if (!code) return toast.error("Por favor, introduce un PIN.");
+            const { data } = await supabase.from('family_pins').select('*').eq('pin', code).single(); 
+            if (data) {
+              onAccess("senior", code, data.senior_name); 
+            } else {
+              // EL ABUELO CREA EL PIN AHORA
+              await supabase.from('family_pins').insert([{ pin: code }]);
+              onAccess("senior", code, ""); 
+            }
+          }} className="w-full bg-primary text-white p-5 rounded-2xl text-xl font-black uppercase">Entrar</button>
         </div>
       )}
+      
       {view === "f_login" && (
         <div className="w-full space-y-3">
-          <input className="w-full p-4 bg-slate-50 border rounded-xl font-bold text-sm" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
+          <input className="w-full p-4 bg-slate-50 border rounded-xl font-bold text-sm" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} />
           <input className="w-full p-4 bg-slate-50 border rounded-xl font-bold text-sm" type="password" placeholder="Contraseña" value={pass} onChange={e => setPass(e.target.value)} />
           <input className="w-full p-4 bg-blue-50 border rounded-xl font-bold text-sm" placeholder="PIN Familiar" value={code} onChange={e => setCode(e.target.value)} />
           <button onClick={()=>handleF('log')} className="w-full bg-primary text-white p-4 rounded-xl font-black uppercase mt-2 shadow-md">Entrar</button>
         </div>
       )}
+      
       {view === "f_reg" && (
-        <div className="w-full space-y-2">
-          <input className="w-full p-3 bg-slate-50 border rounded-xl text-sm font-bold" placeholder="Tu Nombre" value={regN} onChange={e => setRegN(e.target.value)} />
-          <input className="w-full p-3 bg-slate-50 border rounded-xl text-sm font-bold" placeholder="Tu Teléfono" type="tel" value={regP} onChange={e => setRegP(e.target.value)} />
-          <input className="w-full p-3 bg-slate-50 border rounded-xl text-sm font-bold" placeholder="Email" value={email} onChange={e => setEmail(e.target.value)} />
-          <input className="w-full p-3 bg-slate-50 border rounded-xl text-sm font-bold" type="password" placeholder="Contraseña" value={pass} onChange={e => setPass(e.target.value)} />
-          <input className="w-full p-3 bg-blue-50 border rounded-xl text-sm font-bold" placeholder="PIN" value={code} onChange={e => setCode(e.target.value)} />
-          <button onClick={()=>handleF('reg')} className="w-full bg-[#1EA851] text-white p-4 rounded-xl font-black uppercase mt-2 shadow-md">Registrar</button>
+        <div className="w-full space-y-3">
+          <input className="w-full p-4 bg-slate-50 border rounded-xl font-bold text-sm" placeholder="Correo electrónico" value={email} onChange={e => setEmail(e.target.value)} />
+          <input className="w-full p-4 bg-slate-50 border rounded-xl font-bold text-sm" type="password" placeholder="Contraseña (Mínimo 6 caracteres)" value={pass} onChange={e => setPass(e.target.value)} />
+          <input className="w-full p-4 bg-blue-50 border rounded-xl font-bold text-sm" placeholder="PIN que creó la abuela/o" value={code} onChange={e => setCode(e.target.value)} />
+          <button onClick={()=>handleF('reg')} className="w-full bg-primary text-white p-4 rounded-xl font-black uppercase mt-2 shadow-md">Crear Cuenta</button>
         </div>
       )}
-      {view !== "choice" && <button onClick={() => setView("choice")} className="mt-6 text-slate-300 font-bold text-xs uppercase tracking-widest p-2">Volver</button>}
+      
+      {view !== "choice" && (
+        <button onClick={() => setView("choice")} className="mt-6 text-slate-300 font-bold text-xs uppercase tracking-widest p-2">
+          Volver
+        </button>
+      )}
     </div>
   );
 }
 
 /* --- COMPONENTES MENORES --- */
 function MapView({ lat, lng }: any) { const mapUrl = `https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.005},${lat-0.005},${lng+0.005},${lat+0.005}&layer=mapnik&marker=${lat},${lng}`; return ( <div className="w-full h-32 rounded-xl overflow-hidden border relative"><iframe width="100%" height="100%" frameBorder="0" scrolling="no" src={mapUrl} style={{ border: 0 }} /></div> ); }
-function NameAndPhoneStep({ title, onNext }: any) { const [n, setN] = useState(""); const [p, setP] = useState(""); return ( <div className="p-8 flex flex-col h-full bg-white"><h1 className="text-3xl font-black mt-10 tracking-tighter leading-none">{title}</h1><input className="mt-8 w-full p-4 border-b-4 border-primary text-2xl font-black outline-none placeholder:text-slate-200" value={n} onChange={e=>setN(e.target.value)} placeholder="Tu Nombre" /><input type="tel" className="mt-6 w-full p-4 border-b-4 border-[#1EA851] text-2xl font-black outline-none placeholder:text-slate-200" value={p} onChange={e=>setP(e.target.value)} placeholder="Tu Teléfono" /><button onClick={() => { if(n) onNext(n, p); else toast.error("El nombre es obligatorio"); }} className="mt-auto w-full bg-primary text-white py-5 rounded-2xl font-black text-xl shadow-lg">CONTINUAR</button></div> ); }
+function NameAndPhoneStep({ title, onNext }: any) { const [n, setN] = useState(""); const [p, setP] = useState(""); return ( <div className="p-8 flex flex-col h-full bg-white"><h1 className="text-3xl font-black mt-10 tracking-tighter leading-none">{title}</h1><input className="mt-8 w-full p-4 border-b-4 border-primary text-2xl font-black outline-none placeholder:text-slate-200" value={n} onChange={e=>setN(e.target.value)} placeholder="Tu Nombre" /><input type="tel" className="mt-6 w-full p-4 border-b-4 border-primary text-2xl font-black outline-none placeholder:text-slate-200" value={p} onChange={e=>setP(e.target.value)} placeholder="Tu Teléfono" /><button onClick={() => { if(n) onNext(n, p); else toast.error("El nombre es obligatorio"); }} className="mt-auto w-full bg-primary text-white py-5 rounded-2xl font-black text-xl shadow-lg">CONTINUAR</button></div> ); }
 function Profile({ name, code, phone, onLogout, back }: any) { return ( <div className="h-full flex flex-col bg-white p-5 justify-between"><div><div className="flex items-center gap-3 mb-6"><button onClick={back} className="p-2 bg-slate-100 rounded-lg"><ArrowLeft size={18}/></button><h1 className="text-xl font-black italic leading-none">Perfil</h1></div><div className="bg-slate-50 p-8 rounded-[30px] text-center border shadow-inner"><h2 className="text-3xl font-black text-primary mb-2 truncate leading-none">{name}</h2><p className="font-black text-slate-500 text-base mb-6">{phone}</p><div className="bg-white p-4 rounded-xl shadow-sm inline-block"><p className="font-black text-slate-400 uppercase text-[10px] tracking-widest mb-1">PIN DE CONEXIÓN</p><p className="text-2xl font-black tracking-widest text-slate-800">{code}</p></div></div></div><button onClick={onLogout} className="w-full bg-red-50 text-red-500 py-5 rounded-2xl font-black text-lg active:scale-95 transition flex items-center justify-center gap-3"><LogOut size={20}/> CERRAR SESIÓN</button></div> ); }
 
-/* --- NUEVA PANTALLA DE CARGA MODERNA (FOTO + OVERLAY NEGRO) --- */
+/* --- PANTALLA DE CARGA --- */
 function SplashScreen() {
   return (
     <div className="h-full relative flex flex-col items-center justify-center p-8 overflow-hidden z-50">
-      
-      {/* 1. Fondo de Imagen Completo (bg-cover) */}
       <div 
         className="absolute inset-0 bg-cover bg-center z-0" 
         style={{ backgroundImage: "url('/foto1.jpg')" }} 
       />
-      
-      {/* 2. Capa Negra Transparente (Overlay Moderno) */}
       <div className="absolute inset-0 bg-black/70 z-10" /> 
       
-      {/* 3. Contenido Central (Elevar por encima de la capa negra) */}
       <div className="relative z-20 flex flex-col items-center gap-6">
-        
-        {/* Contenedor del Icono Moderno (Efecto cristal) */}
         <div className="bg-white/10 p-6 rounded-full border border-white/20 backdrop-blur-sm shadow-xl">
           <Heart 
-            className="text-[#E5484D] transition-transform duration-1000 ease-in-out scale-110 animate-pulse" 
-            fill="#E5484D" 
+            className="text-primary scale-110 animate-pulse" 
+            fill={APP_BLUE} 
             size={40} 
           />
         </div>
-
-        {/* Texto del Logo Modernizado */}
         <div className="text-center">
           <h1 className="text-4xl font-extrabold text-white tracking-tighter mb-2 leading-none">
-            Conecta<span className="text-primary-light font-bold">Mayores</span>
+            Conecta<span className="text-primary font-bold">Mayores</span>
           </h1>
           <p className="text-white/80 font-medium text-sm px-4">
             Tu familia, siempre cerca.
           </p>
         </div>
-
-        {/* Indicador de Carga Fino */}
         <div className="mt-8 flex flex-col items-center gap-2">
           <div className="w-10 h-10 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
           <span className="text-xs text-white/60 font-mono">Iniciando...</span>
